@@ -2,11 +2,7 @@ import asyncio
 import requests
 import os
 from datetime import date
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -33,7 +29,6 @@ cfg = {
 }
 
 price_snapshots = {}   # {period: {symbol: price}}
-signals_today = {}
 scanner_running = False
 
 # ================== BINANCE ==================
@@ -57,22 +52,20 @@ def get_price(symbol):
 # ================== UI ==================
 
 def settings_keyboard():
-    return InlineKeyboardMarkup(
+    return InlineKeyboardMarkup([
         [
-            [
-                InlineKeyboardButton("📈 Период ЛОНГ", callback_data="long_period"),
-                InlineKeyboardButton("📈 % ЛОНГ", callback_data="long_percent"),
-            ],
-            [
-                InlineKeyboardButton("📉 Период ШОРТ", callback_data="short_period"),
-                InlineKeyboardButton("📉 % ШОРТ", callback_data="short_percent"),
-            ],
-            [
-                InlineKeyboardButton("▶️ ВКЛ", callback_data="on"),
-                InlineKeyboardButton("⛔ ВЫКЛ", callback_data="off"),
-            ],
-        ]
-    )
+            InlineKeyboardButton("📈 Период ЛОНГ", callback_data="long_period"),
+            InlineKeyboardButton("📈 % ЛОНГ", callback_data="long_percent"),
+        ],
+        [
+            InlineKeyboardButton("📉 Период ШОРТ", callback_data="short_period"),
+            InlineKeyboardButton("📉 % ШОРТ", callback_data="short_percent"),
+        ],
+        [
+            InlineKeyboardButton("▶️ ВКЛ", callback_data="on"),
+            InlineKeyboardButton("⛔ ВЫКЛ", callback_data="off"),
+        ],
+    ])
 
 # ================== COMMANDS ==================
 
@@ -109,30 +102,31 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML",
     )
 
-# ================== BUTTON HANDLER ==================
+# ================== CALLBACK BUTTONS ==================
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-
     action = q.data
 
     # ВКЛ / ВЫКЛ — сразу действие
     if action == "on":
         cfg["enabled"] = True
         await q.message.reply_text(
-            "▶️ Сканер включен", reply_markup=settings_keyboard()
+            "▶️ Сканер включен",
+            reply_markup=settings_keyboard(),
         )
         return
 
     if action == "off":
         cfg["enabled"] = False
         await q.message.reply_text(
-            "⛔ Сканер выключен", reply_markup=settings_keyboard()
+            "⛔ Сканер выключен",
+            reply_markup=settings_keyboard(),
         )
         return
 
-    # Остальное — ждём число
+    # Остальное — ждём ввод числа
     context.user_data["edit"] = action
     await q.message.reply_text(
         f"Введи значение для: <b>{action}</b>",
@@ -156,14 +150,14 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["edit"] = None
 
     await update.message.reply_text(
-        "✅ Сохранено", reply_markup=settings_keyboard()
+        "✅ Сохранено",
+        reply_markup=settings_keyboard(),
     )
 
 # ================== SCANNER ==================
 
 async def scanner():
     global scanner_running
-
     if scanner_running or not cfg["enabled"]:
         return
 
@@ -187,11 +181,9 @@ async def scanner():
 
                 pct = (price - prev) / prev * 100
 
-                # ЛОНГ
                 if p == cfg["long_period"] and pct >= cfg["long_percent"]:
                     await send_signal("📈 ЛОНГ", s, pct, p)
 
-                # ШОРТ
                 if p == cfg["short_period"] and pct >= cfg["short_percent"]:
                     await send_signal("📉 ШОРТ", s, pct, p)
 
@@ -218,7 +210,7 @@ async def send_signal(side, symbol, pct, period):
 
 # ================== MAIN ==================
 
-async def loop_job(context: ContextTypes.DEFAULT_TYPE):
+async def loop_job(context):
     await scanner()
 
 app = ApplicationBuilder().token(TOKEN).build()
