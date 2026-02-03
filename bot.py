@@ -195,10 +195,10 @@ async def scanner():
                 pct = (price - prev) / prev * 100
 
                 if p == cfg["long_period"] and pct >= cfg["long_percent"]:
-                    await send_signal("📈 ЛОНГ", s, pct, p)
+                    await send_signal("🟢 ЛОНГ", s, pct, p)
 
                 if p == cfg["short_period"] and pct >= cfg["short_percent"]:
-                    await send_signal("📉 ШОРТ", s, pct, p)
+                    await send_signal("🔴 ШОРТ", s, pct, p)
 
                 price_snapshots[p][s] = price
 
@@ -207,10 +207,14 @@ async def scanner():
     finally:
         scanner_running = False
 
+# ================== SIGNAL ==================
+
 async def send_signal(side, symbol, pct, period):
+    coinglass_link = f"https://www.coinglass.com/tv/Binance_{symbol}"
+
     msg = (
         f"{side} <b>СИГНАЛ</b>\n"
-        f"🪙 <b>{symbol}</b>\n"
+        f"🪙 <b><a href='{coinglass_link}'>{symbol}</a></b>\n"
         f"📈 Рост: {pct:.2f}%\n"
         f"⏱ За {period} мин"
     )
@@ -219,6 +223,7 @@ async def send_signal(side, symbol, pct, period):
         chat_id=cfg["chat_id"],
         text=msg,
         parse_mode="HTML",
+        disable_web_page_preview=True,
     )
 
 # ================== MAIN ==================
