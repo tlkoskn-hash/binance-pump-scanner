@@ -1,14 +1,19 @@
 import asyncio
 import requests
 import os
-import time
 from datetime import date
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     ContextTypes,
-    CallbackQueryHandler
+    CallbackQueryHandler,
+    MessageHandler,
+    filters,
 )
 
 # ================== НАСТРОЙКИ ==================
@@ -24,7 +29,7 @@ cfg = {
     "short_period": 10,
     "short_percent": 30.0,
     "enabled": False,
-    "chat_id": None
+    "chat_id": None,
 }
 
 price_snapshots = {}   # {period: {symbol: price}}
@@ -45,27 +50,29 @@ def get_price(symbol):
     r = requests.get(
         f"{BINANCE}/fapi/v1/ticker/price",
         params={"symbol": symbol},
-        timeout=5
+        timeout=5,
     ).json()
     return float(r["price"])
 
 # ================== UI ==================
 
 def settings_keyboard():
-    return InlineKeyboardMarkup([
+    return InlineKeyboardMarkup(
         [
-            InlineKeyboardButton("📈 Период ЛОНГ", callback_data="long_period"),
-            InlineKeyboardButton("📈 % ЛОНГ", callback_data="long_percent")
-        ],
-        [
-            InlineKeyboardButton("📉 Период ШОРТ", callback_data="short_period"),
-            InlineKeyboardButton("📉 % ШОРТ", callback_data="short_percent")
-        ],
-        [
-            InlineKeyboardButton("▶️ ВКЛ", callback_data="on"),
-            InlineKeyboardButton("⛔ ВЫКЛ", callback_data="off")
+            [
+                InlineKeyboardButton("📈 Период ЛОНГ", callback_data="long_period"),
+                InlineKeyboardButton("📈 % ЛОНГ", callback_data="long_percent"),
+            ],
+            [
+                InlineKeyboardButton("📉 Период ШОРТ", callback_data="short_period"),
+                InlineKeyboardButton("📉 % ШОРТ", callback_data="short_percent"),
+            ],
+            [
+                InlineKeyboardButton("▶️ ВКЛ", callback_data="on"),
+                InlineKeyboardButton("⛔ ВЫКЛ", callback_data="off"),
+            ],
         ]
-    ])
+    )
 
 # ================== COMMANDS ==================
 
@@ -86,42 +93,77 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         text,
         parse_mode="HTML",
-        reply_markup=settings_keyboard()
+        reply_markup=settings_keyboard(),
     )
+
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        f"📊 <b>Статус PUMP Screener</b>\n\n"
+        f"▶️ Включен: {cfg['enabled']}\n\n"
+        f"📈 ЛОНГ:\n"
+        f"  • Период: {cfg['long_period']} мин\n"
+        f"  • Рост: {cfg['long_percent']}%\n\n"
+        f"📉 ШОРТ:\n"
+        f"  • Период: {cfg['short_period']} мин\n"
+        f"  • Рост: {cfg['short_percent']}%",
+        parse_mode="HTML",
+    )
+
+# ================== BUTTON HANDLER ==================
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
 
-    context.user_data["edit"] = q.data
+    action = q.data
+
+    # ВКЛ / ВЫКЛ — сразу действие
+    if action == "on":
+        cfg["enabled"] = True
+        await q.message.reply_text(
+            "▶️ Сканер включен", reply_markup=settings_keyboard()
+        )
+        return
+
+    if action == "off":
+        cfg["enabled"] = False
+        await q.message.reply_text(
+            "⛔ Сканер выключен", reply_markup=settings_keyboard()
+        )
+        return
+
+    # Остальное — ждём число
+    context.user_data["edit"] = action
     await q.message.reply_text(
-        f"Введи значение для: <b>{q.data}</b>",
-        parse_mode="HTML"
+        f"Введи значение для: <b>{action}</b>",
+        parse_mode="HTML",
     )
 
-async def text_handler(update: Update, context):
+# ================== TEXT INPUT ==================
+
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = context.user_data.get("edit")
     if not key:
         return
 
-    value = float(update.message.text)
+    try:
+        value = float(update.message.text)
+    except ValueError:
+        await update.message.reply_text("❌ Введи число")
+        return
+
     cfg[key] = int(value) if "period" in key else value
     context.user_data["edit"] = None
 
-    await update.message.reply_text("✅ Сохранено", reply_markup=settings_keyboard())
-
-async def on(update: Update, context):
-    cfg["enabled"] = True
-    await update.message.reply_text("▶️ Сканер включен")
-
-async def off(update: Update, context):
-    cfg["enabled"] = False
-    await update.message.reply_text("⛔ Сканер выключен")
+    await update.message.reply_text(
+        "✅ Сохранено", reply_markup=settings_keyboard()
+    )
 
 # ================== SCANNER ==================
 
 async def scanner():
     global scanner_running
+
     if scanner_running or not cfg["enabled"]:
         return
 
@@ -144,8 +186,6 @@ async def scanner():
                     continue
 
                 pct = (price - prev) / prev * 100
-                today = str(date.today())
-                key = (s, today, p)
 
                 # ЛОНГ
                 if p == cfg["long_period"] and pct >= cfg["long_percent"]:
@@ -173,23 +213,22 @@ async def send_signal(side, symbol, pct, period):
     await app.bot.send_message(
         chat_id=cfg["chat_id"],
         text=msg,
-        parse_mode="HTML"
+        parse_mode="HTML",
     )
 
 # ================== MAIN ==================
 
-async def loop_job(context):
+async def loop_job(context: ContextTypes.DEFAULT_TYPE):
     await scanner()
 
 app = ApplicationBuilder().token(TOKEN).build()
+
 app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("status", status))
 app.add_handler(CallbackQueryHandler(button))
-app.add_handler(CommandHandler("on", on))
-app.add_handler(CommandHandler("off", off))
-app.add_handler(CommandHandler("text", text_handler))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
 app.job_queue.run_repeating(loop_job, interval=60, first=10)
 
 print(">>> PUMP SCREENER RUNNING <<<")
 app.run_polling()
-
