@@ -54,18 +54,37 @@ def get_price(symbol):
 def settings_keyboard():
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📈 Период ЛОНГ", callback_data="long_period"),
+            InlineKeyboardButton("🕝 Период ЛОНГ", callback_data="long_period"),
             InlineKeyboardButton("📈 % ЛОНГ", callback_data="long_percent"),
         ],
         [
-            InlineKeyboardButton("📉 Период ШОРТ", callback_data="short_period"),
+            InlineKeyboardButton("🕝 Период ШОРТ", callback_data="short_period"),
             InlineKeyboardButton("📉 % ШОРТ", callback_data="short_percent"),
+        ],
+        [
+            InlineKeyboardButton("📊 Статус", callback_data="status"),
         ],
         [
             InlineKeyboardButton("▶️ ВКЛ", callback_data="on"),
             InlineKeyboardButton("⛔ ВЫКЛ", callback_data="off"),
         ],
     ])
+
+def status_text():
+    return (
+        "🤖 <b>PUMP Screener Binance</b>\n\n"
+        "Я сканирую рынок:\n"
+        "📈 маленькие пампы — для <b>ЛОНГА</b>\n"
+        "📉 большие пампы — для <b>ШОРТА</b>\n\n"
+        "<b>Текущие настройки:</b>\n"
+        f"▶️ Включен: <b>{cfg['enabled']}</b>\n\n"
+        "📈 <b>ЛОНГ</b>\n"
+        f"• Период: {cfg['long_period']} мин\n"
+        f"• Рост: {cfg['long_percent']}%\n\n"
+        "📉 <b>ШОРТ</b>\n"
+        f"• Период: {cfg['short_period']} мин\n"
+        f"• Рост: {cfg['short_percent']}%\n"
+    )
 
 # ================== COMMANDS ==================
 
@@ -75,31 +94,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     cfg["chat_id"] = update.effective_chat.id
 
-    text = (
-        "🤖 <b>PUMP Screener Binance</b>\n\n"
-        "Я сканирую рынок:\n"
-        "📈 маленькие пампы — для ЛОНГА\n"
-        "📉 большие пампы — для ШОРТА\n\n"
-        "Настройки ниже ⬇️"
-    )
-
     await update.message.reply_text(
-        text,
+        status_text(),
         parse_mode="HTML",
         reply_markup=settings_keyboard(),
     )
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        f"📊 <b>Статус PUMP Screener</b>\n\n"
-        f"▶️ Включен: {cfg['enabled']}\n\n"
-        f"📈 ЛОНГ:\n"
-        f"  • Период: {cfg['long_period']} мин\n"
-        f"  • Рост: {cfg['long_percent']}%\n\n"
-        f"📉 ШОРТ:\n"
-        f"  • Период: {cfg['short_period']} мин\n"
-        f"  • Рост: {cfg['short_percent']}%",
+        status_text(),
         parse_mode="HTML",
+        reply_markup=settings_keyboard(),
     )
 
 # ================== CALLBACK BUTTONS ==================
@@ -109,24 +114,32 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
     action = q.data
 
-    # ВКЛ / ВЫКЛ — сразу действие
     if action == "on":
         cfg["enabled"] = True
-        await q.message.reply_text(
-            "▶️ Сканер включен",
+        await q.message.edit_text(
+            status_text(),
+            parse_mode="HTML",
             reply_markup=settings_keyboard(),
         )
         return
 
     if action == "off":
         cfg["enabled"] = False
-        await q.message.reply_text(
-            "⛔ Сканер выключен",
+        await q.message.edit_text(
+            status_text(),
+            parse_mode="HTML",
             reply_markup=settings_keyboard(),
         )
         return
 
-    # Остальное — ждём ввод числа
+    if action == "status":
+        await q.message.edit_text(
+            status_text(),
+            parse_mode="HTML",
+            reply_markup=settings_keyboard(),
+        )
+        return
+
     context.user_data["edit"] = action
     await q.message.reply_text(
         f"Введи значение для: <b>{action}</b>",
