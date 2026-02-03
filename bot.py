@@ -1,7 +1,7 @@
 import asyncio
 import requests
 import os
-from datetime import date
+from datetime import date, datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -29,6 +29,7 @@ cfg = {
 }
 
 price_snapshots = {}   # {period: {symbol: price}}
+signals_today = {}     # {(symbol, date): count}
 scanner_running = False
 
 # ================== BINANCE ==================
@@ -71,6 +72,7 @@ def settings_keyboard():
     ])
 
 def status_text():
+    now = datetime.now().strftime("%H:%M:%S")
     return (
         "🤖 <b>PUMP Screener Binance</b>\n\n"
         "Я сканирую рынок:\n"
@@ -83,7 +85,8 @@ def status_text():
         f"• Рост: {cfg['long_percent']}%\n\n"
         "📉 <b>ШОРТ</b>\n"
         f"• Период: {cfg['short_period']} мин\n"
-        f"• Рост: {cfg['short_percent']}%\n"
+        f"• Рост: {cfg['short_percent']}%\n\n"
+        f"⏱ <i>Обновлено: {now}</i>"
     )
 
 # ================== COMMANDS ==================
@@ -91,9 +94,7 @@ def status_text():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
         return
-
     cfg["chat_id"] = update.effective_chat.id
-
     await update.message.reply_text(
         status_text(),
         parse_mode="HTML",
@@ -116,34 +117,22 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if action == "on":
         cfg["enabled"] = True
-        await q.message.edit_text(
-            status_text(),
-            parse_mode="HTML",
-            reply_markup=settings_keyboard(),
-        )
-        return
-
-    if action == "off":
+    elif action == "off":
         cfg["enabled"] = False
-        await q.message.edit_text(
-            status_text(),
+    elif action == "status":
+        pass
+    else:
+        context.user_data["edit"] = action
+        await q.message.reply_text(
+            f"Введи значение для: <b>{action}</b>",
             parse_mode="HTML",
-            reply_markup=settings_keyboard(),
         )
         return
 
-    if action == "status":
-        await q.message.edit_text(
-            status_text(),
-            parse_mode="HTML",
-            reply_markup=settings_keyboard(),
-        )
-        return
-
-    context.user_data["edit"] = action
-    await q.message.reply_text(
-        f"Введи значение для: <b>{action}</b>",
+    await q.message.edit_text(
+        status_text(),
         parse_mode="HTML",
+        reply_markup=settings_keyboard(),
     )
 
 # ================== TEXT INPUT ==================
@@ -210,13 +199,19 @@ async def scanner():
 # ================== SIGNAL ==================
 
 async def send_signal(side, symbol, pct, period):
+    today = str(date.today())
+    key = (symbol, today)
+    count = signals_today.get(key, 0) + 1
+    signals_today[key] = count
+
     coinglass_link = f"https://www.coinglass.com/tv/Binance_{symbol}"
 
     msg = (
         f"{side} <b>СИГНАЛ</b>\n"
         f"🪙 <b><a href='{coinglass_link}'>{symbol}</a></b>\n"
         f"📈 Рост: {pct:.2f}%\n"
-        f"⏱ За {period} мин"
+        f"⏱ За {period} мин\n"
+        f"🔁 <b>Сигнал 24h:</b> {count}"
     )
 
     await app.bot.send_message(
