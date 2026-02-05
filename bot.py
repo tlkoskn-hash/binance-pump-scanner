@@ -111,16 +111,22 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================== CALLBACK BUTTONS ==================
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global scanner_running
+
     q = update.callback_query
     await q.answer()
     action = q.data
 
     if action == "on":
         cfg["enabled"] = True
+
     elif action == "off":
         cfg["enabled"] = False
+        scanner_running = False  # ⛔ мгновенно останавливаем
+
     elif action == "status":
         pass
+
     else:
         context.user_data["edit"] = action
         await q.message.reply_text(
@@ -160,7 +166,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def scanner():
     global scanner_running
-    if scanner_running or not cfg["enabled"]:
+
+    if scanner_running or not cfg["enabled"] or not cfg["chat_id"]:
         return
 
     scanner_running = True
@@ -173,9 +180,15 @@ async def scanner():
             price_snapshots.setdefault(p, {})
 
         for s in symbols:
+            if not cfg["enabled"]:
+                break
+
             price = get_price(s)
 
             for p in periods:
+                if not cfg["enabled"]:
+                    break
+
                 prev = price_snapshots[p].get(s)
                 if not prev:
                     price_snapshots[p][s] = price
@@ -199,6 +212,9 @@ async def scanner():
 # ================== SIGNAL ==================
 
 async def send_signal(side, symbol, pct, period):
+    if not cfg["enabled"] or not cfg["chat_id"]:
+        return
+
     today = str(date.today())
     key = (symbol, today)
     count = signals_today.get(key, 0) + 1
