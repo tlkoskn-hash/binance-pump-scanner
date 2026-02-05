@@ -20,8 +20,8 @@ ALLOWED_USERS = {1128293345}
 BINANCE = "https://fapi.binance.com"
 
 cfg = {
-    "long_period": 1,
-    "long_percent": 1.0,
+    "long_period": 2,
+    "long_percent": 2.0,
     "short_period": 10,
     "short_percent": 30.0,
     "enabled": False,
@@ -253,3 +253,4 @@ app.job_queue.run_repeating(loop_job, interval=60, first=10)
 
 print(">>> PUMP SCREENER RUNNING <<<")
 app.run_polling()
+
