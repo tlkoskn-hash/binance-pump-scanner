@@ -27,7 +27,6 @@ ALLOWED_USERS = set(
 )
 
 BINANCE = "https://fapi.binance.com"
-
 UTC_PLUS_3 = timezone(timedelta(hours=3))
 
 cfg = {
@@ -97,7 +96,6 @@ def keyboard():
 
 def status_text():
     now = datetime.now(UTC_PLUS_3).strftime("%H:%M:%S")
-
     return (
         "🤖 <b>PUMP / DUMP Screener Binance</b>\n\n"
         f"▶️ Включен: <b>{cfg['enabled']}</b>\n\n"
@@ -157,7 +155,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     new_text = status_text()
-
     if q.message.text != new_text:
         await q.message.edit_text(
             new_text,
@@ -181,42 +178,45 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cfg[key] = int(value) if "period" in key else value
     context.user_data["edit"] = None
 
-    await update.message.reply_text(
-        "✅ Сохранено",
-        reply_markup=keyboard(),
-    )
+    await update.message.reply_text("✅ Сохранено", reply_markup=keyboard())
 
 # ================== SCANNER ==================
 
-async def scanner():
+async def scanner_loop():
     global scanner_running
 
-    if scanner_running or not cfg["enabled"] or not cfg["chat_id"]:
+    if scanner_running:
         return
 
     scanner_running = True
-
     try:
         symbols = get_symbols()
-        now = datetime.now(UTC_PLUS_3)
 
-        for s in symbols:
-            if not cfg["enabled"]:
-                break
+        while True:
+            if not cfg["enabled"] or not cfg["chat_id"]:
+                await asyncio.sleep(1)
+                continue
 
-            price = get_price(s)
-            history = price_history[s]
-            history.append((now, price))
+            now = datetime.now(UTC_PLUS_3)
 
-            # чистим старые данные (макс 60 минут)
-            while history and (now - history[0][0]).total_seconds() > 3600:
-                history.popleft()
+            for s in symbols:
+                if not cfg["enabled"]:
+                    break
 
-            await check_signal("🟢 ЛОНГ", s, history, cfg["long_period"], cfg["long_percent"], True)
-            await check_signal("🔴 ШОРТ", s, history, cfg["short_period"], cfg["short_percent"], True)
-            await check_signal("🔵 DUMP", s, history, cfg["dump_period"], cfg["dump_percent"], False)
+                price = get_price(s)
+                history = price_history[s]
+                history.append((now, price))
 
-            await asyncio.sleep(0.05)
+                while history and (now - history[0][0]).total_seconds() > 3600:
+                    history.popleft()
+
+                await check_signal("🟢 ЛОНГ", s, history, cfg["long_period"], cfg["long_percent"], True)
+                await check_signal("🔴 ШОРТ", s, history, cfg["short_period"], cfg["short_percent"], True)
+                await check_signal("🔵 DUMP", s, history, cfg["dump_period"], cfg["dump_percent"], False)
+
+                await asyncio.sleep(0.05)
+
+            await asyncio.sleep(10)  # минимальный опрос Binance
 
     finally:
         scanner_running = False
@@ -236,6 +236,7 @@ async def check_signal(side, symbol, history, period_min, percent, is_up):
 
     if (is_up and change >= percent) or (not is_up and change <= -percent):
         await send_signal(side, symbol, abs(change), period_min)
+        history.clear()
 
 # ================== SIGNAL ==================
 
@@ -245,8 +246,8 @@ async def send_signal(side, symbol, pct, period):
 
     today = datetime.now(UTC_PLUS_3).date()
     signals_today[(symbol, today)] += 1
-
     count = signals_today[(symbol, today)]
+
     link = f"https://www.coinglass.com/tv/Binance_{symbol}"
 
     msg = (
@@ -266,18 +267,20 @@ async def send_signal(side, symbol, pct, period):
 
 # ================== MAIN ==================
 
-async def loop_job(context):
-    await scanner()
+async def on_startup(app):
+    asyncio.create_task(scanner_loop())
 
-app = ApplicationBuilder().token(TOKEN).build()
+app = (
+    ApplicationBuilder()
+    .token(TOKEN)
+    .post_init(on_startup)
+    .build()
+)
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("status", status_cmd))
 app.add_handler(CallbackQueryHandler(button))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
-app.job_queue.run_repeating(loop_job, interval=60, first=5)
-
 print(">>> PUMP / DUMP SCREENER RUNNING <<<")
 app.run_polling()
-
