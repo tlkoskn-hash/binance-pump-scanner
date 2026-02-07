@@ -249,11 +249,12 @@ async def send_signal(side, symbol, pct, period):
     count = signals_today[(symbol, today)]
 
     link = f"https://www.coinglass.com/tv/Binance_{symbol}"
+    sign = "+" if pct > 0 else ""
 
     msg = (
         f"{side} <b>СИГНАЛ</b>\n"
         f"🪙 <b><a href='{link}'>{symbol}</a></b>\n"
-        f"📈 Изменение: {pct:.2f}%\n"
+        f"📈 Изменение: {sign}{pct:.2f}%\n"
         f"⏱ За {period} мин\n"
         f"🔁 <b>Сигнал 24h:</b> {count}"
     )
@@ -264,6 +265,7 @@ async def send_signal(side, symbol, pct, period):
         parse_mode="HTML",
         disable_web_page_preview=True,
     )
+
 
 # ================== MAIN ==================
 
@@ -284,3 +286,4 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
 print(">>> PUMP / DUMP SCREENER RUNNING <<<")
 app.run_polling()
+
