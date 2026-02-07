@@ -50,7 +50,7 @@ def get_price(symbol):
 
 # ================== UI ==================
 
-def settings_keyboard():
+def keyboard():
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🕝 Период ЛОНГ", callback_data="long_period"),
@@ -73,9 +73,6 @@ def status_text():
     now = datetime.now().strftime("%H:%M:%S")
     return (
         "🤖 <b>PUMP Screener Binance</b>\n\n"
-        "📈 маленькие пампы — для <b>ЛОНГА</b>\n"
-        "📉 большие пампы — для <b>ШОРТА</b>\n\n"
-        "<b>Текущие настройки:</b>\n"
         f"▶️ Включен: <b>{cfg['enabled']}</b>\n\n"
         "📈 <b>ЛОНГ</b>\n"
         f"• Период: {cfg['long_period']} мин\n"
@@ -83,7 +80,7 @@ def status_text():
         "📉 <b>ШОРТ</b>\n"
         f"• Период: {cfg['short_period']} мин\n"
         f"• Рост: {cfg['short_percent']}%\n\n"
-        f"⏱ <i>Обновлено: {now}</i>"
+        f"⏱ <i>{now}</i>"
     )
 
 # ================== HANDLERS ==================
@@ -93,9 +90,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     cfg["chat_id"] = update.effective_chat.id
     await update.message.reply_text(
-        status_text(),
-        parse_mode="HTML",
-        reply_markup=settings_keyboard(),
+        status_text(), parse_mode="HTML", reply_markup=keyboard()
     )
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -111,16 +106,11 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
     else:
         context.user_data["edit"] = action
-        await q.message.reply_text(
-            f"Введи значение для: <b>{action}</b>",
-            parse_mode="HTML",
-        )
+        await q.message.reply_text(f"Введи значение для <b>{action}</b>", parse_mode="HTML")
         return
 
     await q.message.edit_text(
-        status_text(),
-        parse_mode="HTML",
-        reply_markup=settings_keyboard(),
+        status_text(), parse_mode="HTML", reply_markup=keyboard()
     )
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -136,51 +126,43 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     cfg[key] = int(value) if "period" in key else value
     context.user_data["edit"] = None
-
-    await update.message.reply_text(
-        "✅ Сохранено",
-        reply_markup=settings_keyboard(),
-    )
+    await update.message.reply_text("✅ Сохранено", reply_markup=keyboard())
 
 # ================== SCANNER ==================
 
 async def scanner_loop():
     while True:
         if cfg["enabled"] and cfg["chat_id"]:
-            try:
-                symbols = get_symbols()
-                periods = {cfg["long_period"], cfg["short_period"]}
+            symbols = get_symbols()
+            periods = {cfg["long_period"], cfg["short_period"]}
+
+            for p in periods:
+                price_snapshots.setdefault(p, {})
+
+            for s in symbols:
+                if not cfg["enabled"]:
+                    break
+
+                price = get_price(s)
                 for p in periods:
-                    price_snapshots.setdefault(p, {})
-
-                for s in symbols:
-                    if not cfg["enabled"]:
-                        break
-
-                    price = get_price(s)
-                    for p in periods:
-                        prev = price_snapshots[p].get(s)
-                        if not prev:
-                            price_snapshots[p][s] = price
-                            continue
-
-                        pct = (price - prev) / prev * 100
-
-                        if p == cfg["long_period"] and pct >= cfg["long_percent"]:
-                            await send_signal("🟢 ЛОНГ", s, pct, p)
-
-                        if p == cfg["short_period"] and pct >= cfg["short_percent"]:
-                            await send_signal("🔴 ШОРТ", s, pct, p)
-
+                    prev = price_snapshots[p].get(s)
+                    if not prev:
                         price_snapshots[p][s] = price
+                        continue
 
-                    await asyncio.sleep(0.05)
-            except Exception as e:
-                print("Scanner error:", e)
+                    pct = (price - prev) / prev * 100
+
+                    if p == cfg["long_period"] and pct >= cfg["long_percent"]:
+                        await send_signal("🟢 ЛОНГ", s, pct, p)
+
+                    if p == cfg["short_period"] and pct >= cfg["short_percent"]:
+                        await send_signal("🔴 ШОРТ", s, pct, p)
+
+                    price_snapshots[p][s] = price
+
+                await asyncio.sleep(0.05)
 
         await asyncio.sleep(cfg["long_period"] * 60)
-
-# ================== SIGNAL ==================
 
 async def send_signal(side, symbol, pct, period):
     today = str(date.today())
@@ -194,7 +176,7 @@ async def send_signal(side, symbol, pct, period):
         f"🪙 <b><a href='{link}'>{symbol}</a></b>\n"
         f"📈 Рост: {pct:.2f}%\n"
         f"⏱ За {period} мин\n"
-        f"🔁 <b>Сигнал 24h:</b> {signals_today[key]}"
+        f"🔁 Сигнал 24h: {signals_today[key]}"
     )
 
     await app.bot.send_message(
@@ -204,23 +186,18 @@ async def send_signal(side, symbol, pct, period):
         disable_web_page_preview=True,
     )
 
-# ================== POST INIT ==================
+# ================== START ==================
 
-async def post_init(app):
-    app.create_task(scanner_loop())
-
-# ================== MAIN ==================
-
-app = (
-    ApplicationBuilder()
-    .token(TOKEN)
-    .post_init(post_init)
-    .build()
-)
+app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(button))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
 print(">>> PUMP SCREENER RUNNING <<<")
-app.run_polling()
+
+# ⬇️ запускаем PTB (он поднимает loop)
+app.run_polling(close_loop=False)
+
+# ⬇️ запускаем фон ПОСЛЕ polling
+asyncio.get_event_loop().create_task(scanner_loop())
