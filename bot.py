@@ -209,6 +209,8 @@ async def scanner_loop():
     print(">>> PUMP / DUMP scanner loop started <<<")
 
     try:
+        symbols = get_symbols()  # ← ВОТ ЭТОГО НЕ ХВАТАЛО
+
         while True:
             cycle_start = datetime.now(UTC_PLUS_3)
 
@@ -296,5 +298,6 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
 print(">>> PUMP / DUMP SCREENER RUNNING <<<")
 app.run_polling()
+
 
 
