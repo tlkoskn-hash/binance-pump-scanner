@@ -22,7 +22,10 @@ from telegram.ext import (
 
 TOKEN = os.getenv("BOT_TOKEN")
 
-ALLOWED_USERS = {1128293345}
+ALLOWED_USERS = set(
+    int(x) for x in os.getenv("ALLOWED_USERS", "").split(",") if x.strip()
+)
+
 BINANCE = "https://fapi.binance.com"
 
 UTC_PLUS_3 = timezone(timedelta(hours=3))
