@@ -71,12 +71,21 @@ def get_symbols():
 
 
 def get_price(symbol):
-    r = requests.get(
-        f"{BINANCE}/fapi/v1/ticker/price",
-        params={"symbol": symbol},
-        timeout=5,
-    ).json()
-    return float(r["price"])
+    try:
+        r = requests.get(
+            f"{BINANCE}/fapi/v1/ticker/price",
+            params={"symbol": symbol},
+            timeout=5,
+        ).json()
+
+        if "price" not in r:
+            return None
+
+        return float(r["price"])
+
+    except Exception as e:
+        print(f"[WARN] price timeout {symbol}: {e}")
+        return None
 
 # ================== UI ==================
 
@@ -230,6 +239,9 @@ async def scanner_loop():
                     break
 
                 price = get_price(s)
+                if price is None:
+                    continue
+
                 history = price_history[s]
                 history.append((now, price))
 
@@ -289,4 +301,3 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
 print(">>> PUMP / DUMP SCREENER RUNNING <<<")
 app.run_polling()
-
