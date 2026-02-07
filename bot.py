@@ -232,16 +232,24 @@ async def scanner_loop():
 
         await asyncio.sleep(cfg["long_period"] * 60)
 
+# ================== POST INIT ==================
+
+async def post_init(app):
+    app.create_task(scanner_loop())
+
 # ================== MAIN ==================
 
-app = ApplicationBuilder().token(TOKEN).build()
+app = (
+    ApplicationBuilder()
+    .token(TOKEN)
+    .post_init(post_init)
+    .build()
+)
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("status", status))
 app.add_handler(CallbackQueryHandler(button))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-
-app.create_task(scanner_loop())
 
 print(">>> PUMP SCREENER RUNNING <<<")
 app.run_polling()
