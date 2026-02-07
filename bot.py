@@ -16,7 +16,6 @@ from telegram.ext import (
 
 TOKEN = os.getenv("BOT_TOKEN")
 ALLOWED_USERS = {1128293345}
-
 BINANCE = "https://fapi.binance.com"
 
 cfg = {
@@ -30,7 +29,6 @@ cfg = {
 
 price_snapshots = {}   # {period: {symbol: price}}
 signals_today = {}     # {(symbol, date): count}
-scanner_running = False
 
 # ================== BINANCE ==================
 
@@ -38,8 +36,8 @@ def get_symbols():
     r = requests.get(f"{BINANCE}/fapi/v1/exchangeInfo", timeout=10).json()
     return [
         s["symbol"]
-        for s in r["symbols"]
-        if s["quoteAsset"] == "USDT" and s["status"] == "TRADING"
+        for s in r.get("symbols", [])
+        if s.get("quoteAsset") == "USDT" and s.get("status") == "TRADING"
     ]
 
 def get_price(symbol):
@@ -108,25 +106,19 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=settings_keyboard(),
     )
 
-# ================== CALLBACK BUTTONS ==================
+# ================== CALLBACK ==================
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global scanner_running
-
     q = update.callback_query
     await q.answer()
     action = q.data
 
     if action == "on":
         cfg["enabled"] = True
-
     elif action == "off":
         cfg["enabled"] = False
-        scanner_running = False  # ⛔ мгновенно останавливаем
-
     elif action == "status":
         pass
-
     else:
         context.user_data["edit"] = action
         await q.message.reply_text(
@@ -165,49 +157,41 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================== SCANNER ==================
 
 async def scanner():
-    global scanner_running
-
-    if scanner_running or not cfg["enabled"] or not cfg["chat_id"]:
+    if not cfg["enabled"] or not cfg["chat_id"]:
         return
 
-    scanner_running = True
+    symbols = get_symbols()
+    periods = {cfg["long_period"], cfg["short_period"]}
 
-    try:
-        symbols = get_symbols()
-        periods = {cfg["long_period"], cfg["short_period"]}
+    for p in periods:
+        price_snapshots.setdefault(p, {})
+
+    for s in symbols:
+        if not cfg["enabled"]:
+            break
+
+        try:
+            price = get_price(s)
+        except:
+            continue
 
         for p in periods:
-            price_snapshots.setdefault(p, {})
-
-        for s in symbols:
-            if not cfg["enabled"]:
-                break
-
-            price = get_price(s)
-
-            for p in periods:
-                if not cfg["enabled"]:
-                    break
-
-                prev = price_snapshots[p].get(s)
-                if not prev:
-                    price_snapshots[p][s] = price
-                    continue
-
-                pct = (price - prev) / prev * 100
-
-                if p == cfg["long_period"] and pct >= cfg["long_percent"]:
-                    await send_signal("🟢 ЛОНГ", s, pct, p)
-
-                if p == cfg["short_period"] and pct >= cfg["short_percent"]:
-                    await send_signal("🔴 ШОРТ", s, pct, p)
-
+            prev = price_snapshots[p].get(s)
+            if not prev:
                 price_snapshots[p][s] = price
+                continue
 
-            await asyncio.sleep(0.05)
+            pct = (price - prev) / prev * 100
 
-    finally:
-        scanner_running = False
+            if p == cfg["long_period"] and pct >= cfg["long_percent"]:
+                await send_signal("🟢 ЛОНГ", s, pct, p)
+
+            if p == cfg["short_period"] and pct >= cfg["short_percent"]:
+                await send_signal("🔴 ШОРТ", s, pct, p)
+
+            price_snapshots[p][s] = price
+
+        await asyncio.sleep(0.05)
 
 # ================== SIGNAL ==================
 
@@ -220,11 +204,11 @@ async def send_signal(side, symbol, pct, period):
     count = signals_today.get(key, 0) + 1
     signals_today[key] = count
 
-    coinglass_link = f"https://www.coinglass.com/tv/Binance_{symbol}"
+    link = f"https://www.coinglass.com/tv/Binance_{symbol}"
 
     msg = (
         f"{side} <b>СИГНАЛ</b>\n"
-        f"🪙 <b><a href='{coinglass_link}'>{symbol}</a></b>\n"
+        f"🪙 <b><a href='{link}'>{symbol}</a></b>\n"
         f"📈 Рост: {pct:.2f}%\n"
         f"⏱ За {period} мин\n"
         f"🔁 <b>Сигнал 24h:</b> {count}"
@@ -237,10 +221,18 @@ async def send_signal(side, symbol, pct, period):
         disable_web_page_preview=True,
     )
 
-# ================== MAIN ==================
+# ================== BACKGROUND LOOP ==================
 
-async def loop_job(context):
-    await scanner()
+async def scanner_loop():
+    while True:
+        try:
+            await scanner()
+        except Exception as e:
+            print("Scanner error:", e)
+
+        await asyncio.sleep(cfg["long_period"] * 60)
+
+# ================== MAIN ==================
 
 app = ApplicationBuilder().token(TOKEN).build()
 
@@ -249,8 +241,7 @@ app.add_handler(CommandHandler("status", status))
 app.add_handler(CallbackQueryHandler(button))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
-app.job_queue.run_repeating(loop_job, interval=60, first=10)
+app.create_task(scanner_loop())
 
 print(">>> PUMP SCREENER RUNNING <<<")
 app.run_polling()
-
