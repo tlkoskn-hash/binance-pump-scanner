@@ -51,15 +51,32 @@ price_history = defaultdict(deque)
 # (symbol, date) -> count
 signals_today = defaultdict(int)
 
+SYMBOLS_CACHE = []
+LAST_SYMBOL_UPDATE = None
+
 # ================== BINANCE ==================
 
 def get_symbols():
-    r = requests.get(f"{BINANCE}/fapi/v1/exchangeInfo", timeout=10).json()
-    return [
-        s["symbol"]
-        for s in r["symbols"]
-        if s["quoteAsset"] == "USDT" and s["status"] == "TRADING"
+    global SYMBOLS_CACHE, LAST_SYMBOL_UPDATE
+
+    if SYMBOLS_CACHE and LAST_SYMBOL_UPDATE:
+        if datetime.now() - LAST_SYMBOL_UPDATE < timedelta(hours=1):
+            return SYMBOLS_CACHE
+
+    r = requests.get(f"{BINANCE}/fapi/v1/ticker/24hr", timeout=10).json()
+
+    symbols = [
+        s for s in r
+        if s["symbol"].endswith("USDT")
     ]
+
+    symbols.sort(key=lambda x: float(x["quoteVolume"]), reverse=True)
+
+    SYMBOLS_CACHE = [s["symbol"] for s in symbols[:100]]
+    LAST_SYMBOL_UPDATE = datetime.now()
+
+    return SYMBOLS_CACHE
+
 
 def get_price(symbol):
     r = requests.get(
@@ -216,7 +233,7 @@ async def scanner_loop():
 
                 await asyncio.sleep(0.05)
 
-            await asyncio.sleep(10)  # минимальный опрос Binance
+            await asyncio.sleep(10)
 
     finally:
         scanner_running = False
@@ -266,7 +283,6 @@ async def send_signal(side, symbol, pct, period):
         disable_web_page_preview=True,
     )
 
-
 # ================== MAIN ==================
 
 async def on_startup(app):
@@ -286,4 +302,3 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
 print(">>> PUMP / DUMP SCREENER RUNNING <<<")
 app.run_polling()
-
