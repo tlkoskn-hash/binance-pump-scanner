@@ -139,9 +139,15 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+   new_text = status_text()
+
+if q.message.text != new_text:
     await q.message.edit_text(
-        status_text(), parse_mode="HTML", reply_markup=keyboard()
+        new_text,
+        parse_mode="HTML",
+        reply_markup=settings_keyboard(),
     )
+
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = context.user_data.get("edit")
@@ -260,4 +266,5 @@ print(">>> PUMP / DUMP SCREENER RUNNING <<<")
 app.run_polling(close_loop=False)
 
 asyncio.get_event_loop().create_task(scanner_loop())
+
 
