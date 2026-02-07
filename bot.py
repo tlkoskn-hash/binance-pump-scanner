@@ -206,10 +206,12 @@ async def scanner_loop():
         return
 
     scanner_running = True
-    try:
-        symbols = get_symbols()
+    print(">>> PUMP / DUMP scanner loop started <<<")
 
+    try:
         while True:
+            cycle_start = datetime.now(UTC_PLUS_3)
+
             if not cfg["enabled"] or not cfg["chat_id"]:
                 await asyncio.sleep(1)
                 continue
@@ -233,27 +235,17 @@ async def scanner_loop():
 
                 await asyncio.sleep(0.05)
 
+            cycle_time = (datetime.now(UTC_PLUS_3) - cycle_start).total_seconds()
+            print(f"[PUMP/DUMP] Цикл занял: {cycle_time:.2f} сек")
+
             await asyncio.sleep(10)
+
+    except asyncio.CancelledError:
+        print(">>> PUMP / DUMP scanner loop cancelled <<<")
+        raise
 
     finally:
         scanner_running = False
-
-async def check_signal(side, symbol, history, period_min, percent, is_up):
-    now = datetime.now(UTC_PLUS_3)
-    cutoff = now - timedelta(minutes=period_min)
-
-    prices = [p for t, p in history if t >= cutoff]
-    if len(prices) < 2:
-        return
-
-    start_price = prices[0]
-    last_price = prices[-1]
-
-    change = (last_price - start_price) / start_price * 100
-
-    if (is_up and change >= percent) or (not is_up and change <= -percent):
-        await send_signal(side, symbol, abs(change), period_min)
-        history.clear()
 
 # ================== SIGNAL ==================
 
@@ -304,4 +296,5 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
 print(">>> PUMP / DUMP SCREENER RUNNING <<<")
 app.run_polling()
+
 
