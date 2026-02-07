@@ -20,18 +20,18 @@ TOKEN = os.getenv("BOT_TOKEN")
 ALLOWED_USERS = {1128293345}
 BINANCE = "https://fapi.binance.com"
 
-POLL_INTERVAL = 5          # секунд
+POLL_INTERVAL = 15          # секунд
 HISTORY_LIMIT_MIN = 180    # минут истории
 TIME_OFFSET_HOURS = 3      # UTC+3
 
 cfg = {
-    "long_period": 10,
-    "long_percent": 3.0,
+    "long_period": 1,
+    "long_percent": 1,
 
-    "short_period": 30,
+    "short_period": 20,
     "short_percent": 8.0,
 
-    "dump_period": 10,
+    "dump_period": 30,
     "dump_percent": 5.0,
 
     "enabled": False,
@@ -260,3 +260,4 @@ print(">>> PUMP / DUMP SCREENER RUNNING <<<")
 app.run_polling(close_loop=False)
 
 asyncio.get_event_loop().create_task(scanner_loop())
+
