@@ -112,7 +112,7 @@ def status_text():
         f"• {cfg['long_period']} мин / {cfg['long_percent']}%\n\n"
         "🔴 <b>ШОРТ</b>\n"
         f"• {cfg['short_period']} мин / {cfg['short_percent']}%\n\n"
-        "🔵 <b>DUMP</b>\n"
+        "⏬ <b>DUMP</b>\n"
         f"• {cfg['dump_period']} мин / {cfg['dump_percent']}%\n\n"
         f"⏱ Рынок обновлён: <i>{now} (UTC+3)</i>"
     )
@@ -238,7 +238,7 @@ async def scanner_loop():
 
                 await check_signal("🟢 ЛОНГ", s, history, cfg["long_period"], cfg["long_percent"], True)
                 await check_signal("🔴 ШОРТ", s, history, cfg["short_period"], cfg["short_percent"], True)
-                await check_signal("🔵 DUMP", s, history, cfg["dump_period"], cfg["dump_percent"], False)
+                await check_signal("⏬ DUMP", s, history, cfg["dump_period"], cfg["dump_percent"], False)
 
                 await asyncio.sleep(0.05)
 
@@ -289,3 +289,4 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
 print(">>> PUMP / DUMP SCREENER RUNNING <<<")
 app.run_polling()
+
