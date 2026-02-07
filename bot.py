@@ -73,8 +73,8 @@ def status_text():
     now = datetime.now().strftime("%H:%M:%S")
     return (
         "🤖 <b>PUMP Screener Binance</b>\n\n"
-        "📈 ЛОНГ: маленькие пампы\n"
-        "📉 ШОРТ: большие пампы\n\n"
+        "📈 маленькие пампы — для <b>ЛОНГА</b>\n"
+        "📉 большие пампы — для <b>ШОРТА</b>\n\n"
         "<b>Текущие настройки:</b>\n"
         f"▶️ Включен: <b>{cfg['enabled']}</b>\n\n"
         "📈 <b>ЛОНГ</b>\n"
@@ -180,6 +180,8 @@ async def scanner_loop():
 
         await asyncio.sleep(cfg["long_period"] * 60)
 
+# ================== SIGNAL ==================
+
 async def send_signal(side, symbol, pct, period):
     today = str(date.today())
     key = (symbol, today)
@@ -202,21 +204,23 @@ async def send_signal(side, symbol, pct, period):
         disable_web_page_preview=True,
     )
 
+# ================== POST INIT ==================
+
+async def post_init(app):
+    app.create_task(scanner_loop())
+
 # ================== MAIN ==================
 
-async def main():
-    global app
+app = (
+    ApplicationBuilder()
+    .token(TOKEN)
+    .post_init(post_init)
+    .build()
+)
 
-    app = ApplicationBuilder().token(TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CallbackQueryHandler(button))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-
-    asyncio.create_task(scanner_loop())
-
-    print(">>> PUMP SCREENER RUNNING <<<")
-    await app.run_polling()
-
-if __name__ == "__main__":
-    asyncio.run(main())
+print(">>> PUMP SCREENER RUNNING <<<")
+app.run_polling()
