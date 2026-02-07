@@ -276,7 +276,8 @@ app.add_handler(CommandHandler("status", status_cmd))
 app.add_handler(CallbackQueryHandler(button))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
-app.job_queue.run_repeating(loop_job, interval=5, first=5)
+app.job_queue.run_repeating(loop_job, interval=60, first=5)
 
 print(">>> PUMP / DUMP SCREENER RUNNING <<<")
 app.run_polling()
+
