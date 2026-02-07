@@ -27,8 +27,8 @@ cfg = {
     "chat_id": None,
 }
 
-price_snapshots = {}   # {period: {symbol: price}}
-signals_today = {}     # {(symbol, date): count}
+price_snapshots = {}
+signals_today = {}
 
 # ================== BINANCE ==================
 
@@ -73,9 +73,8 @@ def status_text():
     now = datetime.now().strftime("%H:%M:%S")
     return (
         "🤖 <b>PUMP Screener Binance</b>\n\n"
-        "Я сканирую рынок:\n"
-        "📈 маленькие пампы — для <b>ЛОНГА</b>\n"
-        "📉 большие пампы — для <b>ШОРТА</b>\n\n"
+        "📈 ЛОНГ: маленькие пампы\n"
+        "📉 ШОРТ: большие пампы\n\n"
         "<b>Текущие настройки:</b>\n"
         f"▶️ Включен: <b>{cfg['enabled']}</b>\n\n"
         "📈 <b>ЛОНГ</b>\n"
@@ -87,7 +86,7 @@ def status_text():
         f"⏱ <i>Обновлено: {now}</i>"
     )
 
-# ================== COMMANDS ==================
+# ================== HANDLERS ==================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
@@ -98,15 +97,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML",
         reply_markup=settings_keyboard(),
     )
-
-async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        status_text(),
-        parse_mode="HTML",
-        reply_markup=settings_keyboard(),
-    )
-
-# ================== CALLBACK ==================
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -133,8 +123,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=settings_keyboard(),
     )
 
-# ================== TEXT INPUT ==================
-
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = context.user_data.get("edit")
     if not key:
@@ -156,53 +144,46 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================== SCANNER ==================
 
-async def scanner():
-    if not cfg["enabled"] or not cfg["chat_id"]:
-        return
+async def scanner_loop():
+    while True:
+        if cfg["enabled"] and cfg["chat_id"]:
+            try:
+                symbols = get_symbols()
+                periods = {cfg["long_period"], cfg["short_period"]}
+                for p in periods:
+                    price_snapshots.setdefault(p, {})
 
-    symbols = get_symbols()
-    periods = {cfg["long_period"], cfg["short_period"]}
+                for s in symbols:
+                    if not cfg["enabled"]:
+                        break
 
-    for p in periods:
-        price_snapshots.setdefault(p, {})
+                    price = get_price(s)
+                    for p in periods:
+                        prev = price_snapshots[p].get(s)
+                        if not prev:
+                            price_snapshots[p][s] = price
+                            continue
 
-    for s in symbols:
-        if not cfg["enabled"]:
-            break
+                        pct = (price - prev) / prev * 100
 
-        try:
-            price = get_price(s)
-        except:
-            continue
+                        if p == cfg["long_period"] and pct >= cfg["long_percent"]:
+                            await send_signal("🟢 ЛОНГ", s, pct, p)
 
-        for p in periods:
-            prev = price_snapshots[p].get(s)
-            if not prev:
-                price_snapshots[p][s] = price
-                continue
+                        if p == cfg["short_period"] and pct >= cfg["short_percent"]:
+                            await send_signal("🔴 ШОРТ", s, pct, p)
 
-            pct = (price - prev) / prev * 100
+                        price_snapshots[p][s] = price
 
-            if p == cfg["long_period"] and pct >= cfg["long_percent"]:
-                await send_signal("🟢 ЛОНГ", s, pct, p)
+                    await asyncio.sleep(0.05)
+            except Exception as e:
+                print("Scanner error:", e)
 
-            if p == cfg["short_period"] and pct >= cfg["short_percent"]:
-                await send_signal("🔴 ШОРТ", s, pct, p)
-
-            price_snapshots[p][s] = price
-
-        await asyncio.sleep(0.05)
-
-# ================== SIGNAL ==================
+        await asyncio.sleep(cfg["long_period"] * 60)
 
 async def send_signal(side, symbol, pct, period):
-    if not cfg["enabled"] or not cfg["chat_id"]:
-        return
-
     today = str(date.today())
     key = (symbol, today)
-    count = signals_today.get(key, 0) + 1
-    signals_today[key] = count
+    signals_today[key] = signals_today.get(key, 0) + 1
 
     link = f"https://www.coinglass.com/tv/Binance_{symbol}"
 
@@ -211,7 +192,7 @@ async def send_signal(side, symbol, pct, period):
         f"🪙 <b><a href='{link}'>{symbol}</a></b>\n"
         f"📈 Рост: {pct:.2f}%\n"
         f"⏱ За {period} мин\n"
-        f"🔁 <b>Сигнал 24h:</b> {count}"
+        f"🔁 <b>Сигнал 24h:</b> {signals_today[key]}"
     )
 
     await app.bot.send_message(
@@ -221,35 +202,21 @@ async def send_signal(side, symbol, pct, period):
         disable_web_page_preview=True,
     )
 
-# ================== BACKGROUND LOOP ==================
-
-async def scanner_loop():
-    while True:
-        try:
-            await scanner()
-        except Exception as e:
-            print("Scanner error:", e)
-
-        await asyncio.sleep(cfg["long_period"] * 60)
-
-# ================== POST INIT ==================
-
-async def post_init(app):
-    app.create_task(scanner_loop())
-
 # ================== MAIN ==================
 
-app = (
-    ApplicationBuilder()
-    .token(TOKEN)
-    .post_init(post_init)
-    .build()
-)
+async def main():
+    global app
 
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("status", status))
-app.add_handler(CallbackQueryHandler(button))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    app = ApplicationBuilder().token(TOKEN).build()
 
-print(">>> PUMP SCREENER RUNNING <<<")
-app.run_polling()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(button))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+
+    asyncio.create_task(scanner_loop())
+
+    print(">>> PUMP SCREENER RUNNING <<<")
+    await app.run_polling()
+
+if __name__ == "__main__":
+    asyncio.run(main())
