@@ -45,10 +45,7 @@ cfg = {
 
 scanner_running = False
 
-# symbol -> deque[(timestamp, price)]
 price_history = defaultdict(deque)
-
-# (symbol, date) -> count
 signals_today = defaultdict(int)
 
 SYMBOLS_CACHE = []
@@ -65,16 +62,11 @@ def get_symbols():
 
     r = requests.get(f"{BINANCE}/fapi/v1/ticker/24hr", timeout=10).json()
 
-    symbols = [
-        s for s in r
-        if s["symbol"].endswith("USDT")
-    ]
-
+    symbols = [s for s in r if s["symbol"].endswith("USDT")]
     symbols.sort(key=lambda x: float(x["quoteVolume"]), reverse=True)
 
     SYMBOLS_CACHE = [s["symbol"] for s in symbols[:100]]
     LAST_SYMBOL_UPDATE = datetime.now()
-
     return SYMBOLS_CACHE
 
 
@@ -116,16 +108,12 @@ def status_text():
     return (
         "🤖 <b>PUMP / DUMP Screener Binance</b>\n\n"
         f"▶️ Включен: <b>{cfg['enabled']}</b>\n\n"
-
         "🟢 <b>ЛОНГ</b>\n"
         f"• {cfg['long_period']} мин / {cfg['long_percent']}%\n\n"
-
         "🔴 <b>ШОРТ</b>\n"
         f"• {cfg['short_period']} мин / {cfg['short_percent']}%\n\n"
-
         "🔵 <b>DUMP</b>\n"
         f"• {cfg['dump_period']} мин / {cfg['dump_percent']}%\n\n"
-
         f"⏱ Рынок обновлён: <i>{now} (UTC+3)</i>"
     )
 
@@ -151,18 +139,14 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-
     action = q.data
 
     if action == "on":
         cfg["enabled"] = True
-
     elif action == "off":
         cfg["enabled"] = False
-
     elif action == "status":
         pass
-
     else:
         context.user_data["edit"] = action
         await q.message.reply_text(
@@ -171,13 +155,11 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    new_text = status_text()
-    if q.message.text != new_text:
-        await q.message.edit_text(
-            new_text,
-            parse_mode="HTML",
-            reply_markup=keyboard(),
-        )
+    await q.message.edit_text(
+        status_text(),
+        parse_mode="HTML",
+        reply_markup=keyboard(),
+    )
 
 # ================== TEXT INPUT ==================
 
@@ -197,6 +179,29 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("✅ Сохранено", reply_markup=keyboard())
 
+# ================== CHECK SIGNAL ==================
+
+async def check_signal(side, symbol, history, period_min, percent, is_up):
+    now = datetime.now(UTC_PLUS_3)
+    cutoff = now - timedelta(minutes=period_min)
+
+    prices = [p for t, p in history if t >= cutoff]
+    if len(prices) < 2:
+        return
+
+    start_price = prices[0]
+    last_price = prices[-1]
+
+    change = (last_price - start_price) / start_price * 100
+
+    if is_up and change >= percent:
+        await send_signal(side, symbol, change, period_min)
+        history.clear()
+
+    if not is_up and change <= -percent:
+        await send_signal(side, symbol, abs(change), period_min)
+        history.clear()
+
 # ================== SCANNER ==================
 
 async def scanner_loop():
@@ -209,7 +214,7 @@ async def scanner_loop():
     print(">>> PUMP / DUMP scanner loop started <<<")
 
     try:
-        symbols = get_symbols()  # ← ВОТ ЭТОГО НЕ ХВАТАЛО
+        symbols = get_symbols()
 
         while True:
             cycle_start = datetime.now(UTC_PLUS_3)
@@ -242,26 +247,17 @@ async def scanner_loop():
 
             await asyncio.sleep(10)
 
-    except asyncio.CancelledError:
-        print(">>> PUMP / DUMP scanner loop cancelled <<<")
-        raise
-
     finally:
         scanner_running = False
 
 # ================== SIGNAL ==================
 
 async def send_signal(side, symbol, pct, period):
-    if not cfg["enabled"]:
-        return
-
     today = datetime.now(UTC_PLUS_3).date()
     signals_today[(symbol, today)] += 1
     count = signals_today[(symbol, today)]
 
     link = f"https://www.coinglass.com/tv/Binance_{symbol}"
-
-    # ВАЖНО: знак по типу сигнала
     sign = "-" if "DUMP" in side else "+"
 
     msg = (
@@ -284,12 +280,7 @@ async def send_signal(side, symbol, pct, period):
 async def on_startup(app):
     asyncio.create_task(scanner_loop())
 
-app = (
-    ApplicationBuilder()
-    .token(TOKEN)
-    .post_init(on_startup)
-    .build()
-)
+app = ApplicationBuilder().token(TOKEN).post_init(on_startup).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("status", status_cmd))
@@ -298,6 +289,3 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
 print(">>> PUMP / DUMP SCREENER RUNNING <<<")
 app.run_polling()
-
-
-
