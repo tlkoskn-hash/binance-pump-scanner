@@ -1,7 +1,9 @@
 import asyncio
 import requests
 import os
+import time
 from datetime import date, datetime
+from collections import deque
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -16,23 +18,31 @@ from telegram.ext import (
 
 TOKEN = os.getenv("BOT_TOKEN")
 ALLOWED_USERS = {1128293345}
+
 BINANCE = "https://fapi.binance.com"
 
+POLL_INTERVAL = 5          # ⏱ минимальный интервал опроса (сек)
+HISTORY_LIMIT_MIN = 120    # сколько минут истории хранить
+
 cfg = {
-    "long_period": 2,
-    "long_percent": 2.0,
-    "short_period": 10,
-    "short_percent": 30.0,
+    "long_period": 10,     # минуты
+    "long_percent": 3.0,
+    "short_period": 30,    # минуты
+    "short_percent": 8.0,
     "enabled": False,
     "chat_id": None,
 }
 
-price_snapshots = {}
-signals_today = {}
+# ================== ХРАНИЛИЩА ==================
+
+price_history = {}        # symbol -> deque[(ts, price)]
+last_signal_time = {}     # (symbol, side) -> timestamp
+signals_today = {}        # (symbol, date) -> count
+SYMBOLS = []
 
 # ================== BINANCE ==================
 
-def get_symbols():
+def load_symbols():
     r = requests.get(f"{BINANCE}/fapi/v1/exchangeInfo", timeout=10).json()
     return [
         s["symbol"]
@@ -40,13 +50,9 @@ def get_symbols():
         if s.get("quoteAsset") == "USDT" and s.get("status") == "TRADING"
     ]
 
-def get_price(symbol):
-    r = requests.get(
-        f"{BINANCE}/fapi/v1/ticker/price",
-        params={"symbol": symbol},
-        timeout=5,
-    ).json()
-    return float(r["price"])
+def get_all_prices():
+    r = requests.get(f"{BINANCE}/fapi/v1/ticker/price", timeout=10).json()
+    return {x["symbol"]: float(x["price"]) for x in r}
 
 # ================== UI ==================
 
@@ -106,7 +112,10 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
     else:
         context.user_data["edit"] = action
-        await q.message.reply_text(f"Введи значение для <b>{action}</b>", parse_mode="HTML")
+        await q.message.reply_text(
+            f"Введи значение для <b>{action}</b>",
+            parse_mode="HTML"
+        )
         return
 
     await q.message.edit_text(
@@ -126,57 +135,87 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     cfg[key] = int(value) if "period" in key else value
     context.user_data["edit"] = None
+
     await update.message.reply_text("✅ Сохранено", reply_markup=keyboard())
 
 # ================== SCANNER ==================
 
+def get_price_minutes_ago(history, minutes):
+    target = time.time() - minutes * 60
+    for ts, price in history:
+        if ts >= target:
+            return price
+    return None
+
 async def scanner_loop():
+    global SYMBOLS
+
+    SYMBOLS = load_symbols()
+    print(f"[INFO] Symbols loaded: {len(SYMBOLS)}")
+
     while True:
         if cfg["enabled"] and cfg["chat_id"]:
-            symbols = get_symbols()
-            periods = {cfg["long_period"], cfg["short_period"]}
+            try:
+                prices = get_all_prices()
+                now = time.time()
 
-            for p in periods:
-                price_snapshots.setdefault(p, {})
-
-            for s in symbols:
-                if not cfg["enabled"]:
-                    break
-
-                price = get_price(s)
-                for p in periods:
-                    prev = price_snapshots[p].get(s)
-                    if not prev:
-                        price_snapshots[p][s] = price
+                for symbol in SYMBOLS:
+                    price = prices.get(symbol)
+                    if not price:
                         continue
 
-                    pct = (price - prev) / prev * 100
+                    history = price_history.setdefault(
+                        symbol,
+                        deque(maxlen=int(HISTORY_LIMIT_MIN * 60 / POLL_INTERVAL))
+                    )
+                    history.append((now, price))
 
-                    if p == cfg["long_period"] and pct >= cfg["long_percent"]:
-                        await send_signal("🟢 ЛОНГ", s, pct, p)
+                    # ===== ЛОНГ =====
+                    check_signal(symbol, history, price,
+                                 cfg["long_period"], cfg["long_percent"], "LONG")
 
-                    if p == cfg["short_period"] and pct >= cfg["short_percent"]:
-                        await send_signal("🔴 ШОРТ", s, pct, p)
+                    # ===== ШОРТ =====
+                    check_signal(symbol, history, price,
+                                 cfg["short_period"], cfg["short_percent"], "SHORT")
 
-                    price_snapshots[p][s] = price
+            except Exception as e:
+                print("Scanner error:", e)
 
-                await asyncio.sleep(0.05)
+        await asyncio.sleep(POLL_INTERVAL)
 
-        await asyncio.sleep(cfg["long_period"] * 60)
+def check_signal(symbol, history, current_price, period_min, percent, side):
+    old_price = get_price_minutes_ago(history, period_min)
+    if not old_price:
+        return
 
-async def send_signal(side, symbol, pct, period):
+    pct = (current_price - old_price) / old_price * 100
+    if pct < percent:
+        return
+
+    key = (symbol, side)
+    last_ts = last_signal_time.get(key, 0)
+
+    if time.time() - last_ts < period_min * 60:
+        return  # антиспам
+
+    last_signal_time[key] = time.time()
+    asyncio.create_task(send_signal(symbol, pct, period_min, side))
+
+# ================== SIGNAL ==================
+
+async def send_signal(symbol, pct, period, side):
     today = str(date.today())
-    key = (symbol, today)
-    signals_today[key] = signals_today.get(key, 0) + 1
+    signals_today[(symbol, today)] = signals_today.get((symbol, today), 0) + 1
 
     link = f"https://www.coinglass.com/tv/Binance_{symbol}"
+    emoji = "🟢" if side == "LONG" else "🔴"
 
     msg = (
-        f"{side} <b>СИГНАЛ</b>\n"
+        f"{emoji} <b>{side} СИГНАЛ</b>\n"
         f"🪙 <b><a href='{link}'>{symbol}</a></b>\n"
         f"📈 Рост: {pct:.2f}%\n"
         f"⏱ За {period} мин\n"
-        f"🔁 Сигнал 24h: {signals_today[key]}"
+        f"🔁 Сигнал 24h: {signals_today[(symbol, today)]}"
     )
 
     await app.bot.send_message(
@@ -195,9 +234,6 @@ app.add_handler(CallbackQueryHandler(button))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
 print(">>> PUMP SCREENER RUNNING <<<")
-
-# ⬇️ запускаем PTB (он поднимает loop)
 app.run_polling(close_loop=False)
 
-# ⬇️ запускаем фон ПОСЛЕ polling
 asyncio.get_event_loop().create_task(scanner_loop())
