@@ -33,8 +33,8 @@ cfg = {
     "enabled": False,
     "chat_id": None,
 
-    "long_period": 1,
-    "long_percent": 1.0,
+    "long_period": 2,
+    "long_percent": 2.0,
 
     "short_period": 20,
     "short_percent": 8.0,
@@ -301,3 +301,4 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
 print(">>> PUMP / DUMP SCREENER RUNNING <<<")
 app.run_polling()
+
