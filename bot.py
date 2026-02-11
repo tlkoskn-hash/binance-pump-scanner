@@ -27,6 +27,8 @@ ALLOWED_USERS = set(
 )
 
 BINANCE = "https://fapi.binance.com"
+COINGECKO = "https://api.coingecko.com/api/v3/coins/markets"
+
 UTC_PLUS_3 = timezone(timedelta(hours=3))
 
 cfg = {
@@ -51,6 +53,42 @@ signals_today = defaultdict(int)
 SYMBOLS_CACHE = []
 LAST_SYMBOL_UPDATE = None
 
+# ====== MARKETCAP FILTER ======
+
+TOP_MARKETCAP_LIMIT = 50
+MARKETCAP_REFRESH_SEC = 7 * 24 * 60 * 60
+
+top_marketcap = set()
+
+async def load_top_marketcap():
+    global top_marketcap
+
+    try:
+        params = {
+            "vs_currency": "usd",
+            "order": "market_cap_desc",
+            "per_page": TOP_MARKETCAP_LIMIT,
+            "page": 1,
+        }
+
+        r = requests.get(COINGECKO, params=params, timeout=15).json()
+
+        top_marketcap = {
+            f"{coin['symbol'].upper()}USDT"
+            for coin in r
+            if isinstance(coin, dict) and "symbol" in coin
+        }
+
+        print(f"[MARKETCAP] Loaded top {len(top_marketcap)}")
+
+    except Exception as e:
+        print("[MARKETCAP ERROR]", e)
+
+async def weekly_marketcap_update():
+    while True:
+        await asyncio.sleep(MARKETCAP_REFRESH_SEC)
+        await load_top_marketcap()
+
 # ================== BINANCE ==================
 
 def get_symbols():
@@ -62,7 +100,12 @@ def get_symbols():
 
     r = requests.get(f"{BINANCE}/fapi/v1/ticker/24hr", timeout=10).json()
 
-    symbols = [s for s in r if s["symbol"].endswith("USDT")]
+    symbols = [
+        s for s in r
+        if s["symbol"].endswith("USDT")
+        and s["symbol"] not in top_marketcap  # ← ФИЛЬТР
+    ]
+
     symbols.sort(key=lambda x: float(x["quoteVolume"]), reverse=True)
 
     SYMBOLS_CACHE = [s["symbol"] for s in symbols[:100]]
@@ -123,6 +166,7 @@ def status_text():
         f"• {cfg['short_period']} мин / {cfg['short_percent']}%\n\n"
         "⏬ <b>DUMP</b>\n"
         f"• {cfg['dump_period']} мин / {cfg['dump_percent']}%\n\n"
+        f"🚫 Исключаем топ {TOP_MARKETCAP_LIMIT} по капитализации\n\n"
         f"⏱ Рынок обновлён: <i>{now} (UTC+3)</i>"
     )
 
@@ -290,6 +334,8 @@ async def send_signal(side, symbol, pct, period):
 # ================== MAIN ==================
 
 async def on_startup(app):
+    await load_top_marketcap()
+    asyncio.create_task(weekly_marketcap_update())
     asyncio.create_task(scanner_loop())
 
 app = ApplicationBuilder().token(TOKEN).post_init(on_startup).build()
@@ -301,4 +347,3 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
 print(">>> PUMP / DUMP SCREENER RUNNING <<<")
 app.run_polling()
-
