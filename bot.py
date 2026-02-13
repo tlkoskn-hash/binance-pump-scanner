@@ -40,6 +40,8 @@ cfg = {
 
     "dump_period": 30,
     "dump_percent": 5.0,
+
+    "exclude_top": True,   # ← НОВОЕ
 }
 
 scanner_running = False
@@ -66,11 +68,14 @@ def main_keyboard():
     )
 
 def settings_keyboard():
+    status = "Да" if cfg["exclude_top"] else "Нет"
+
     return ReplyKeyboardMarkup(
         [
             ["🕝 ЛОНГ период", "📈 ЛОНГ %"],
             ["🕝 ШОРТ период", "📉 ШОРТ %"],
             ["🕝 DUMP период", "📉 DUMP %"],
+            [f"🚫 Исключать топ {TOP_MARKETCAP_LIMIT}: {status}"],
             ["🔙 Назад"],
         ],
         resize_keyboard=True,
@@ -118,11 +123,17 @@ def get_symbols():
 
     r = requests.get(f"{BINANCE}/fapi/v1/ticker/24hr", timeout=10).json()
 
-    symbols = [
-        s for s in r
-        if s["symbol"].endswith("USDT")
-        and s["symbol"] not in top_marketcap
-    ]
+    if cfg["exclude_top"]:
+        symbols = [
+            s for s in r
+            if s["symbol"].endswith("USDT")
+            and s["symbol"] not in top_marketcap
+        ]
+    else:
+        symbols = [
+            s for s in r
+            if s["symbol"].endswith("USDT")
+        ]
 
     symbols.sort(key=lambda x: float(x["quoteVolume"]), reverse=True)
 
@@ -152,6 +163,8 @@ def get_price(symbol):
 
 def status_text():
     now = datetime.now(UTC_PLUS_3).strftime("%H:%M:%S")
+    exclude_status = "Да" if cfg["exclude_top"] else "Нет"
+
     return (
         "🤖 <b>PUMP / DUMP Screener Binance</b>\n\n"
         "🟢 <b>ЛОНГ</b>\n"
@@ -160,7 +173,7 @@ def status_text():
         f"• {cfg['short_period']} мин / {cfg['short_percent']}%\n\n"
         "⏬ <b>DUMP</b>\n"
         f"• {cfg['dump_period']} мин / {cfg['dump_percent']}%\n\n"
-        f"🚫 Исключаем топ {TOP_MARKETCAP_LIMIT} по капитализации\n\n"
+        f"🚫 Исключать топ {TOP_MARKETCAP_LIMIT}: <b>{exclude_status}</b>\n\n"
         f"⏱ Рынок обновлён: <i>{now} (UTC+3)</i>"
     )
 
@@ -193,6 +206,14 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "⚙️ Настройки":
         await update.message.reply_text(
             "⚙️ Меню настроек",
+            reply_markup=settings_keyboard()
+        )
+        return
+
+    if text.startswith("🚫 Исключать топ"):
+        cfg["exclude_top"] = not cfg["exclude_top"]
+        await update.message.reply_text(
+            "Настройка обновлена",
             reply_markup=settings_keyboard()
         )
         return
@@ -231,7 +252,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             await update.message.reply_text("❌ Введите число")
 
-# ================== SCANNER ==================
+# ================== ОСТАЛЬНОЙ КОД (БЕЗ ИЗМЕНЕНИЙ) ==================
 
 async def check_signal(side, symbol, history, period_min, percent, is_up):
     now = datetime.now(UTC_PLUS_3)
@@ -264,8 +285,6 @@ async def scanner_loop():
     print(">>> PUMP / DUMP scanner loop started <<<")
 
     try:
-        symbols = get_symbols()
-
         while True:
             cycle_start = datetime.now(UTC_PLUS_3)
 
@@ -273,6 +292,7 @@ async def scanner_loop():
                 await asyncio.sleep(1)
                 continue
 
+            symbols = get_symbols()
             now = datetime.now(UTC_PLUS_3)
 
             for s in symbols:
@@ -323,8 +343,6 @@ async def send_signal(side, symbol, pct, period):
         parse_mode="HTML",
         disable_web_page_preview=True,
     )
-
-# ================== MAIN ==================
 
 async def on_startup(app):
     await load_top_marketcap()
