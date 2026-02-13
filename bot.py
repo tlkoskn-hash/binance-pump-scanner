@@ -6,13 +6,11 @@ from collections import deque, defaultdict
 
 from telegram import (
     Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
 )
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
-    CallbackQueryHandler,
     MessageHandler,
     ContextTypes,
     filters,
@@ -103,7 +101,7 @@ def get_symbols():
     symbols = [
         s for s in r
         if s["symbol"].endswith("USDT")
-        and s["symbol"] not in top_marketcap  # ← ФИЛЬТР
+        and s["symbol"] not in top_marketcap
     ]
 
     symbols.sort(key=lambda x: float(x["quoteVolume"]), reverse=True)
@@ -133,27 +131,17 @@ def get_price(symbol):
 # ================== UI ==================
 
 def keyboard():
-    return InlineKeyboardMarkup([
+    return ReplyKeyboardMarkup(
         [
-            InlineKeyboardButton("🕝 ЛОНГ период", callback_data="long_period"),
-            InlineKeyboardButton("📈 ЛОНГ %", callback_data="long_percent"),
+            ["🕝 ЛОНГ период", "📈 ЛОНГ %"],
+            ["🕝 ШОРТ период", "📉 ШОРТ %"],
+            ["🕝 DUMP период", "📉 DUMP %"],
+            ["📊 Статус"],
+            ["▶️ ВКЛ", "⛔ ВЫКЛ"],
         ],
-        [
-            InlineKeyboardButton("🕝 ШОРТ период", callback_data="short_period"),
-            InlineKeyboardButton("📉 ШОРТ %", callback_data="short_percent"),
-        ],
-        [
-            InlineKeyboardButton("🕝 DUMP период", callback_data="dump_period"),
-            InlineKeyboardButton("📉 DUMP %", callback_data="dump_percent"),
-        ],
-        [
-            InlineKeyboardButton("📊 Статус", callback_data="status"),
-        ],
-        [
-            InlineKeyboardButton("▶️ ВКЛ", callback_data="on"),
-            InlineKeyboardButton("⛔ ВЫКЛ", callback_data="off"),
-        ],
-    ])
+        resize_keyboard=True,
+        is_persistent=True
+    )
 
 def status_text():
     now = datetime.now(UTC_PLUS_3).strftime("%H:%M:%S")
@@ -184,53 +172,54 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=keyboard(),
     )
 
-async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await start(update, context)
-
-# ================== BUTTON HANDLER ==================
-
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    action = q.data
-
-    if action == "on":
-        cfg["enabled"] = True
-    elif action == "off":
-        cfg["enabled"] = False
-    elif action == "status":
-        pass
-    else:
-        context.user_data["edit"] = action
-        await q.message.reply_text(
-            f"Введи значение для: <b>{action}</b>",
-            parse_mode="HTML",
-        )
-        return
-
-    await q.message.edit_text(
-        status_text(),
-        parse_mode="HTML",
-        reply_markup=keyboard(),
-    )
-
-# ================== TEXT INPUT ==================
+# ================== TEXT HANDLER ==================
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    key = context.user_data.get("edit")
-    if not key:
+    if update.effective_user.id not in ALLOWED_USERS:
         return
 
-    try:
-        value = float(update.message.text)
-    except ValueError:
-        await update.message.reply_text("❌ Введи число")
+    text = update.message.text
+
+    if text == "▶️ ВКЛ":
+        cfg["enabled"] = True
+        await update.message.reply_text(status_text(), parse_mode="HTML")
         return
 
-    cfg[key] = int(value) if "period" in key else value
+    if text == "⛔ ВЫКЛ":
+        cfg["enabled"] = False
+        await update.message.reply_text(status_text(), parse_mode="HTML")
+        return
+
+    if text == "📊 Статус":
+        await update.message.reply_text(status_text(), parse_mode="HTML")
+        return
+
+    # режим редактирования
     context.user_data["edit"] = None
 
-    await update.message.reply_text("✅ Сохранено", reply_markup=keyboard())
+    mapping = {
+        "🕝 ЛОНГ период": "long_period",
+        "📈 ЛОНГ %": "long_percent",
+        "🕝 ШОРТ период": "short_period",
+        "📉 ШОРТ %": "short_percent",
+        "🕝 DUMP период": "dump_period",
+        "📉 DUMP %": "dump_percent",
+    }
+
+    if text in mapping:
+        context.user_data["edit"] = mapping[text]
+        await update.message.reply_text("Введите число:")
+        return
+
+    key = context.user_data.get("edit")
+    if key:
+        try:
+            value = float(text)
+            cfg[key] = int(value) if "period" in key else value
+            context.user_data["edit"] = None
+            await update.message.reply_text("✅ Сохранено")
+        except:
+            await update.message.reply_text("❌ Введите число")
 
 # ================== CHECK SIGNAL ==================
 
@@ -279,9 +268,6 @@ async def scanner_loop():
             now = datetime.now(UTC_PLUS_3)
 
             for s in symbols:
-                if not cfg["enabled"]:
-                    break
-
                 price = get_price(s)
                 if price is None:
                     continue
@@ -341,8 +327,6 @@ async def on_startup(app):
 app = ApplicationBuilder().token(TOKEN).post_init(on_startup).build()
 
 app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("status", status_cmd))
-app.add_handler(CallbackQueryHandler(button))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
 print(">>> PUMP / DUMP SCREENER RUNNING <<<")
