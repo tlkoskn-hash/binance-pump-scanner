@@ -30,7 +30,6 @@ COINGECKO = "https://api.coingecko.com/api/v3/coins/markets"
 UTC_PLUS_3 = timezone(timedelta(hours=3))
 
 cfg = {
-    "enabled": False,
     "chat_id": None,
 
     "long_period": 2,
@@ -44,23 +43,44 @@ cfg = {
 }
 
 scanner_running = False
-
 price_history = defaultdict(deque)
 signals_today = defaultdict(int)
 
 SYMBOLS_CACHE = []
 LAST_SYMBOL_UPDATE = None
 
-# ====== MARKETCAP FILTER ======
-
 TOP_MARKETCAP_LIMIT = 50
 MARKETCAP_REFRESH_SEC = 7 * 24 * 60 * 60
-
 top_marketcap = set()
+
+# ================== KEYBOARDS ==================
+
+def main_keyboard():
+    return ReplyKeyboardMarkup(
+        [
+            ["📊 Статус"],
+            ["⚙️ Настройки"],
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+
+def settings_keyboard():
+    return ReplyKeyboardMarkup(
+        [
+            ["🕝 ЛОНГ период", "📈 ЛОНГ %"],
+            ["🕝 ШОРТ период", "📉 ШОРТ %"],
+            ["🕝 DUMP период", "📉 DUMP %"],
+            ["🔙 Назад"],
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+
+# ================== MARKETCAP ==================
 
 async def load_top_marketcap():
     global top_marketcap
-
     try:
         params = {
             "vs_currency": "usd",
@@ -128,26 +148,12 @@ def get_price(symbol):
         print(f"[WARN] price timeout {symbol}: {e}")
         return None
 
-# ================== UI ==================
-
-def keyboard():
-    return ReplyKeyboardMarkup(
-        [
-            ["🕝 ЛОНГ период", "📈 ЛОНГ %"],
-            ["🕝 ШОРТ период", "📉 ШОРТ %"],
-            ["🕝 DUMP период", "📉 DUMP %"],
-            ["📊 Статус"],
-            ["▶️ ВКЛ", "⛔ ВЫКЛ"],
-        ],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+# ================== STATUS ==================
 
 def status_text():
     now = datetime.now(UTC_PLUS_3).strftime("%H:%M:%S")
     return (
         "🤖 <b>PUMP / DUMP Screener Binance</b>\n\n"
-        f"▶️ Включен: <b>{cfg['enabled']}</b>\n\n"
         "🟢 <b>ЛОНГ</b>\n"
         f"• {cfg['long_period']} мин / {cfg['long_percent']}%\n\n"
         "🔴 <b>ШОРТ</b>\n"
@@ -169,7 +175,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         status_text(),
         parse_mode="HTML",
-        reply_markup=keyboard(),
+        reply_markup=main_keyboard(),
     )
 
 # ================== TEXT HANDLER ==================
@@ -180,21 +186,25 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text
 
-    if text == "▶️ ВКЛ":
-        cfg["enabled"] = True
-        await update.message.reply_text(status_text(), parse_mode="HTML")
-        return
-
-    if text == "⛔ ВЫКЛ":
-        cfg["enabled"] = False
-        await update.message.reply_text(status_text(), parse_mode="HTML")
-        return
-
     if text == "📊 Статус":
         await update.message.reply_text(status_text(), parse_mode="HTML")
         return
 
-    # режим редактирования
+    if text == "⚙️ Настройки":
+        await update.message.reply_text(
+            "⚙️ Меню настроек",
+            reply_markup=settings_keyboard()
+        )
+        return
+
+    if text == "🔙 Назад":
+        await update.message.reply_text(
+            status_text(),
+            parse_mode="HTML",
+            reply_markup=main_keyboard()
+        )
+        return
+
     context.user_data["edit"] = None
 
     mapping = {
@@ -221,7 +231,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             await update.message.reply_text("❌ Введите число")
 
-# ================== CHECK SIGNAL ==================
+# ================== SCANNER ==================
 
 async def check_signal(side, symbol, history, period_min, percent, is_up):
     now = datetime.now(UTC_PLUS_3)
@@ -233,7 +243,6 @@ async def check_signal(side, symbol, history, period_min, percent, is_up):
 
     start_price = prices[0]
     last_price = prices[-1]
-
     change = (last_price - start_price) / start_price * 100
 
     if is_up and change >= percent:
@@ -244,7 +253,6 @@ async def check_signal(side, symbol, history, period_min, percent, is_up):
         await send_signal(side, symbol, abs(change), period_min)
         history.clear()
 
-# ================== SCANNER ==================
 
 async def scanner_loop():
     global scanner_running
@@ -261,7 +269,7 @@ async def scanner_loop():
         while True:
             cycle_start = datetime.now(UTC_PLUS_3)
 
-            if not cfg["enabled"] or not cfg["chat_id"]:
+            if not cfg["chat_id"]:
                 await asyncio.sleep(1)
                 continue
 
@@ -292,7 +300,6 @@ async def scanner_loop():
     finally:
         scanner_running = False
 
-# ================== SIGNAL ==================
 
 async def send_signal(side, symbol, pct, period):
     today = datetime.now(UTC_PLUS_3).date()
