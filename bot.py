@@ -197,8 +197,34 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text
 
+    # ===== 1. Если сейчас ввод числа =====
+    key = context.user_data.get("edit")
+    if key:
+        try:
+            value = float(text)
+            cfg[key] = int(value) if "period" in key else value
+            context.user_data["edit"] = None
+
+            # Показываем обновлённый статус
+            await update.message.reply_text(
+                status_text(),
+                parse_mode="HTML",
+                reply_markup=main_keyboard()
+            )
+
+        except:
+            await update.message.reply_text("❌ Введите число")
+
+        return
+
+    # ===== 2. Кнопки главного меню =====
+
     if text == "📊 Статус":
-        await update.message.reply_text(status_text(), parse_mode="HTML")
+        await update.message.reply_text(
+            status_text(),
+            parse_mode="HTML",
+            reply_markup=main_keyboard()
+        )
         return
 
     if text == "⚙️ Настройки":
@@ -210,12 +236,18 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "📊 Все пары":
         cfg["mode"] = "all"
-        await update.message.reply_text("Режим: Все пары", reply_markup=settings_keyboard())
+        await update.message.reply_text(
+            "Режим: Все пары",
+            reply_markup=settings_keyboard()
+        )
         return
 
     if text == "🚫 - топ 50 по кап":
         cfg["mode"] = "exclude_top"
-        await update.message.reply_text("Режим: - топ 50 по капитализации", reply_markup=settings_keyboard())
+        await update.message.reply_text(
+            "Режим: - топ 50 по капитализации",
+            reply_markup=settings_keyboard()
+        )
         return
 
     if text == "🔙 Назад":
@@ -226,7 +258,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    context.user_data["edit"] = None
+    # ===== 3. Переход в режим редактирования =====
 
     mapping = {
         "🕝 ЛОНГ период": "long_period",
@@ -241,16 +273,6 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["edit"] = mapping[text]
         await update.message.reply_text("Введите число:")
         return
-
-    key = context.user_data.get("edit")
-    if key:
-        try:
-            value = float(text)
-            cfg[key] = int(value) if "period" in key else value
-            context.user_data["edit"] = None
-            await update.message.reply_text("✅ Сохранено")
-        except:
-            await update.message.reply_text("❌ Введите число")
 
 # ================== ОСТАЛЬНОЙ КОД БЕЗ ИЗМЕНЕНИЙ ==================
 
@@ -356,3 +378,4 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
 print(">>> PUMP / DUMP SCREENER RUNNING <<<")
 app.run_polling()
+
