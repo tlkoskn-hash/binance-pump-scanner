@@ -60,12 +60,26 @@ top_marketcap = set()
 def main_keyboard():
     return ReplyKeyboardMarkup(
         [
-            ["📊 Статус"],
-            ["⚙️ Настройки"],
+            ["📊 Статус", "⚙️ Настройки"],
         ],
         resize_keyboard=True,
         is_persistent=True
     )
+
+
+def settings_keyboard():
+    return ReplyKeyboardMarkup(
+        [
+            ["🕝 ЛОНГ период", "📈 ЛОНГ %"],
+            ["🕝 ШОРТ период", "📉 ШОРТ %"],
+            ["🕝 DUMP период", "📉 DUMP %"],
+            ["📊 Все пары", "🚫 - топ 50 по кап"],
+            ["🔙 Назад"],
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+
 
 def settings_keyboard():
     return ReplyKeyboardMarkup(
@@ -378,4 +392,5 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
 print(">>> PUMP / DUMP SCREENER RUNNING <<<")
 app.run_polling()
+
 
