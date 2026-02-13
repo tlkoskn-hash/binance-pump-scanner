@@ -41,7 +41,7 @@ cfg = {
     "dump_period": 30,
     "dump_percent": 5.0,
 
-    "exclude_top": True,   # ← НОВОЕ
+    "mode": "exclude_top",  # "all" или "exclude_top"
 }
 
 scanner_running = False
@@ -68,14 +68,12 @@ def main_keyboard():
     )
 
 def settings_keyboard():
-    status = "Да" if cfg["exclude_top"] else "Нет"
-
     return ReplyKeyboardMarkup(
         [
             ["🕝 ЛОНГ период", "📈 ЛОНГ %"],
             ["🕝 ШОРТ период", "📉 ШОРТ %"],
             ["🕝 DUMP период", "📉 DUMP %"],
-            [f"🚫 Исключать топ {TOP_MARKETCAP_LIMIT}: {status}"],
+            ["📊 Все пары", "🚫 - топ 50 по кап"],
             ["🔙 Назад"],
         ],
         resize_keyboard=True,
@@ -123,7 +121,7 @@ def get_symbols():
 
     r = requests.get(f"{BINANCE}/fapi/v1/ticker/24hr", timeout=10).json()
 
-    if cfg["exclude_top"]:
+    if cfg["mode"] == "exclude_top":
         symbols = [
             s for s in r
             if s["symbol"].endswith("USDT")
@@ -163,7 +161,7 @@ def get_price(symbol):
 
 def status_text():
     now = datetime.now(UTC_PLUS_3).strftime("%H:%M:%S")
-    exclude_status = "Да" if cfg["exclude_top"] else "Нет"
+    mode_text = "Все пары" if cfg["mode"] == "all" else f"- топ {TOP_MARKETCAP_LIMIT} по кап"
 
     return (
         "🤖 <b>PUMP / DUMP Screener Binance</b>\n\n"
@@ -173,7 +171,7 @@ def status_text():
         f"• {cfg['short_period']} мин / {cfg['short_percent']}%\n\n"
         "⏬ <b>DUMP</b>\n"
         f"• {cfg['dump_period']} мин / {cfg['dump_percent']}%\n\n"
-        f"🚫 Исключать топ {TOP_MARKETCAP_LIMIT}: <b>{exclude_status}</b>\n\n"
+        f"📊 Режим: <b>{mode_text}</b>\n\n"
         f"⏱ Рынок обновлён: <i>{now} (UTC+3)</i>"
     )
 
@@ -210,12 +208,14 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if text.startswith("🚫 Исключать топ"):
-        cfg["exclude_top"] = not cfg["exclude_top"]
-        await update.message.reply_text(
-            "Настройка обновлена",
-            reply_markup=settings_keyboard()
-        )
+    if text == "📊 Все пары":
+        cfg["mode"] = "all"
+        await update.message.reply_text("Режим: Все пары", reply_markup=settings_keyboard())
+        return
+
+    if text == "🚫 - топ 50 по кап":
+        cfg["mode"] = "exclude_top"
+        await update.message.reply_text("Режим: - топ 50 по капитализации", reply_markup=settings_keyboard())
         return
 
     if text == "🔙 Назад":
@@ -252,7 +252,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             await update.message.reply_text("❌ Введите число")
 
-# ================== ОСТАЛЬНОЙ КОД (БЕЗ ИЗМЕНЕНИЙ) ==================
+# ================== ОСТАЛЬНОЙ КОД БЕЗ ИЗМЕНЕНИЙ ==================
 
 async def check_signal(side, symbol, history, period_min, percent, is_up):
     now = datetime.now(UTC_PLUS_3)
